@@ -4,6 +4,8 @@ torch
 torchvision
 torchaudio
 transformers[torch]==4.34.1
+huggingface-hub==0.19.4
+datasets==2.16.1
 wandb
 portalocker
 torchdata

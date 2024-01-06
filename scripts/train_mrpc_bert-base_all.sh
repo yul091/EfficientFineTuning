@@ -17,7 +17,7 @@ CUDA_VISIBLE_DEVICES=2 python run_glue.py \
   --logging_strategy steps \
   --save_total_limit 1 \
   --learning_rate 2e-5 \
-  --max_steps 23000 \
+  --num_train_epochs 100 \
   --minibatch $MINIBATCH \
   --strategy $STRATEGY \
   --report_to wandb \
@@ -27,5 +27,5 @@ CUDA_VISIBLE_DEVICES=2 python run_glue.py \
   --overwrite_output_dir
 
 
-
+# --max_steps 23000 \
 # --num_train_epochs 100 \
