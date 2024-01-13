@@ -22,6 +22,6 @@ CUDA_VISIBLE_DEVICES=6 python run_glue.py \
   --strategy $STRATEGY \
   --report_to wandb \
   --logging_steps 100 \
-  --run_name glue_mrpc_$MODEL \
+  --run_name run_glue_${TASK_NAME}_${MODEL}_$STRATEGY \
   --output_dir results/$TASK_NAME/$MODEL/$STRATEGY/ \
   --overwrite_output_dir

@@ -24,7 +24,7 @@ for INPUT_LEN_RATE in 0.5 0.6 0.7 0.8 0.9 1.0; do
     --input_len_rate $INPUT_LEN_RATE \
     --report_to wandb \
     --logging_steps 100 \
-    --run_name $TASK_NAME_$MODEL_$STRATEGY-$INPUT_LEN_RATE \
+    --run_name run_glue_${TASK_NAME}_${MODEL}_$STRATEGY \
     --output_dir results/$TASK_NAME/$MODEL/$STRATEGY-$INPUT_LEN_RATE/ \
     --overwrite_output_dir
 done

@@ -1,6 +1,7 @@
 
 import inspect
 import logging
+import numpy as np
 from typing import Dict, Union, Any, List, Tuple, Optional, Callable
 
 import torch
@@ -27,6 +28,7 @@ from transformers.modeling_outputs import SequenceClassifierOutput
 from transformers.models.auto.modeling_auto import MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
 
 from models import ActiveSelectionBase
+from utils import get_nn_layers
 
 if is_datasets_available():
     import datasets
@@ -71,6 +73,8 @@ class ActiveSelectionTrainer(Trainer):
         record_mode: bool = False,
         irreducible_loss: Optional[Dict[int, torch.Tensor]] = None,
         ue_config: Optional[Dict[str, Any]] = None,
+        layer_selection: Optional[str] = None,
+        layer_threshold: Optional[float] = None,
     ):
         super().__init__(model, args, data_collator, train_dataset, eval_dataset, tokenizer, model_init, compute_metrics, callbacks, optimizers, preprocess_logits_for_metrics)
         self.minibatch = -1 if minibatch is None else minibatch
@@ -95,6 +99,9 @@ class ActiveSelectionTrainer(Trainer):
         self.ue_config = ue_config if ue_config is not None else {}
         self._num_samples = self.ue_config.get('stochastic_samples', 10)
         self._input_len_rate = self.ue_config.get('input_len_rate', 1.0)
+        self.layer_selection = layer_selection if layer_selection is not None else 'all'
+        self.layer_threshold = layer_threshold if layer_threshold is not None else 0.0
+        self.variances = [] # Variance for each layer for the current batch
         
             
     def _selection_and_forward(
@@ -116,7 +123,8 @@ class ActiveSelectionTrainer(Trainer):
         elif self.strategy == 'vanilla':
             outputs = model(**inputs, compute_loss=False)
             probs = torch.softmax(outputs.logits, dim=-1)  # (B, C)
-            indices = torch.argmax(probs, dim=-1)[:self.minibatch]  # (B',)
+            winning_score = probs.max(dim=-1).values  # (B,)
+            indices = torch.argsort(winning_score)[:self.minibatch]  # (B',)
             
         elif self.strategy == 'all':
             outputs = model(**inputs, compute_loss=False)
@@ -220,6 +228,9 @@ class ActiveSelectionTrainer(Trainer):
         
         inputs = self._prepare_inputs(cutted_inputs)
         # print("inputs (after cut): ", {k: v.shape if isinstance(v, torch.Tensor) else v for k, v in inputs.items()})
+        if self.layer_selection != 'all': # Ensure all layers are trainable before forward and backward pass
+            for param in model.parameters():
+                param.requires_grad = True
 
         if is_sagemaker_mp_enabled():
             loss_mb = smp_forward_backward(model, inputs, self.args.gradient_accumulation_steps)
@@ -239,7 +250,86 @@ class ActiveSelectionTrainer(Trainer):
         else:
             self.accelerator.backward(loss)
 
-        return loss.detach() / self.args.gradient_accumulation_steps
+        loss = loss.detach() / self.args.gradient_accumulation_steps
+        
+        if self.layer_selection == 'all':
+            return loss
+        
+        # Layer selection
+        layers = get_nn_layers(model)
+        layer_values = {}
+        # layer_values, selected_layers = {}, []
+        
+        if self.layer_selection == 'RGN':   
+            base_lr = self.optimizer.param_groups[0]['lr']
+            for (layer_name, layer) in layers:
+                total_grad_norm = 0
+                total_param_norm = 0
+                for name, param in layer.named_parameters():
+                    if param.requires_grad and "bias" not in name:  # Exclude bias parameters
+                        grad_norm = param.grad.norm().item() # ||∇θ||^2 (or ||g||^2)
+                        param_norm = param.norm().item() # ||θ||^2
+                        total_grad_norm += grad_norm
+                        total_param_norm += param_norm
+                        rgn = grad_norm / (param_norm + 1e-8)  # Avoid division by zero
+                        
+                        # Normalize the RGN value between 0 and 1
+                        normalized_rgn = (rgn - np.min(rgn)) / (np.max(rgn) - np.min(rgn) + 1e-8)
+                        
+                        # Adjust the learning rate for this parameter
+                        param_group = next((g for g in self.optimizer.param_groups if g["params"] == [param]), None)
+                        if param_group:
+                            param_group["lr"] = base_lr * normalized_rgn
+
+                layer_values[layer_name] = total_grad_norm / (total_param_norm + 1e-8)
+            
+                # Select layers that have RGN values above the threshold
+                # if layer_values[layer_name] > self.layer_threshold:
+                #     selected_layers.append(layer_name)
+                    
+        elif self.layer_selection == 'SNR':
+            for (layer_name, layer) in layers:
+                gradients = []
+                for name, param in layer.named_parameters():
+                    if param.requires_grad and "bias" not in name:  # Exclude bias parameters
+                        gradients.append(param.grad)
+                
+                if gradients: # only compute SNR if gradients are present
+                    # Compute the SNR for this layer
+                    gradients_flattened = [grad.view(-1) for grad in gradients]  # Flatten each gradient tensor
+                    gradients = torch.cat(gradients_flattened)  # Stack the flattened gradient tensors
+                    # gradients = torch.stack(gradients) # Shape: (num_params, param_dim)
+                    avg_gradients = gradients.mean() # Shape: (param_dim)
+                    var_gradients = gradients.var() # Shape: (param_dim)
+                    snr = (avg_gradients**2 / (var_gradients + 1e-8)).item()  # Avoid division by zero
+                    layer_values[layer_name] = snr
+                else:
+                    layer_values[layer_name] = 0.0  # or any other default value
+                
+            # Normalize SNR values between 0 and 1
+            for layer_name in layer_values:
+                layer_values[layer_name] = (layer_values[layer_name] - min(layer_values.values())) / (max(layer_values.values()) - min(layer_values.values()) + 1e-8)
+            
+                # # Select layers that have RGN values above the threshold
+                # if layer_values[layer_name] > self.layer_threshold:
+                #     selected_layers.append(layer_name)
+                
+        sorted_layer_names = sorted(layer_values, key=layer_values.get, reverse=True) # descending order
+        top_k = int(np.ceil(len(sorted_layer_names) * self.layer_threshold))  # get the layers to select
+        selected_layers = sorted_layer_names[:top_k]  # top-k percent layers
+                    
+        # Enable or disable gradients for layers based on the selection
+        for layer_name, layer in layers:
+            for param in layer.parameters():
+                param.requires_grad = layer_name in selected_layers
+        
+        self.variances.append(layer_values)
+        # Log selected layers and percentange
+        ratio = len(selected_layers) / len(layer_values)
+        print(f"Selected layers [{len(selected_layers)}-{ratio*100:.2f}%]: {selected_layers}")
+        
+        return loss
+        
     
     def _set_signature_train_columns_if_needed(self):
         if self._signature_columns is None:

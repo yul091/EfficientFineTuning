@@ -20,8 +20,10 @@ import logging
 import os
 import random
 import sys
+import wandb
 sys.dont_write_bytecode = True
 from dataclasses import dataclass, field
+import pandas as pd
 from typing import Optional
 
 import datasets
@@ -53,8 +55,9 @@ from models import (
 )
 from active_trainer import ActiveSelectionTrainer
 
-os.environ["WANDB_PROJECT"] = "<my_project>" # name your W&B project 
+os.environ["WANDB_PROJECT"] = "efficientLM" # name your W&B project 
 os.environ["WANDB_LOG_MODEL"] = "checkpoint" # log all model checkpoints
+# os.environ["WANDB_DIR"] = ".wandb" # save W&B files here
 # os.environ["WANDB_MODE"] = "dryrun" # don't create a W&B run
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
@@ -167,6 +170,14 @@ class DataTrainingArguments:
     input_len_rate: float = field(
         default=1.0,
         metadata={"help": "The ratio of input length to the maximum length."},
+    )
+    layer_selection: str = field(
+        default='all',
+        metadata={"help": "The layer selection method. Default is 'all'."},
+    )
+    layer_threshold: float = field(
+        default=0.0,
+        metadata={"help": "The threshold for layer selection."},
     )
     
 
@@ -611,6 +622,8 @@ def main():
         strategy=data_args.strategy,
         irreducible_loss=loss_dict if data_args.strategy == 'IL' else None,
         ue_config=ue_config,
+        layer_selection=data_args.layer_selection,
+        layer_threshold=data_args.layer_threshold,
     )
 
     # Training
@@ -632,6 +645,10 @@ def main():
         trainer.log_metrics("train", metrics)
         trainer.save_metrics("train", metrics)
         trainer.save_state()
+        
+        if data_args.layer_selection != 'all':
+            variances_df = pd.DataFrame(trainer.variances)
+            variances_df.to_csv(f"{training_args.output_dir}/variances.csv", index=False)
 
     # Evaluation
     if training_args.do_eval:
@@ -712,4 +729,6 @@ def _mp_fn(index):
 
 
 if __name__ == "__main__":
+    # wandb.init(settings=wandb.Settings(_disable_stats=True, _cleanup=True))
     main()
+    wandb.finish() # Code to remove cache files

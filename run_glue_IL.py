@@ -24,6 +24,7 @@ sys.dont_write_bytecode = True
 from dataclasses import dataclass, field
 from typing import Optional
 
+import wandb
 import datasets
 import numpy as np
 from datasets import load_dataset
@@ -50,7 +51,7 @@ from transformers.utils.versions import require_version
 from models import ActiveSelectionBertForSequenceClassification
 from active_trainer import ActiveSelectionTrainer
 
-os.environ["WANDB_PROJECT"] = "<my_project>" # name your W&B project 
+os.environ["WANDB_PROJECT"] = "efficientLM" # name your W&B project 
 os.environ["WANDB_LOG_MODEL"] = "checkpoint" # log all model checkpoints
 os.environ["WANDB_MODE"] = "dryrun" # don't create a W&B run
 
@@ -638,4 +639,6 @@ def _mp_fn(index):
 
 
 if __name__ == "__main__":
+    # wandb.init(settings=wandb.Settings(_disable_stats=True, _cleanup=True))
     main()
+    wandb.finish() # Code to remove cache files

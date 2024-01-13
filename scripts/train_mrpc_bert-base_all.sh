@@ -3,7 +3,7 @@ MINIBATCH=4
 STRATEGY=all
 MODEL=bert-base-cased
 
-CUDA_VISIBLE_DEVICES=2 python run_glue.py \
+CUDA_VISIBLE_DEVICES=0 python run_glue.py \
   --model_name_or_path $MODEL \
   --task_name $TASK_NAME \
   --do_train \
@@ -22,7 +22,7 @@ CUDA_VISIBLE_DEVICES=2 python run_glue.py \
   --strategy $STRATEGY \
   --report_to wandb \
   --logging_steps 100 \
-  --run_name run_glue_mrpc_$MODEL \
+  --run_name ${TASK_NAME}_${MODEL}_${STRATEGY} \
   --output_dir results/$TASK_NAME/$MODEL/$STRATEGY/ \
   --overwrite_output_dir
 

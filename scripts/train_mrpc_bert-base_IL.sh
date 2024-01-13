@@ -2,7 +2,7 @@ TASK_NAME=mrpc
 MODEL=bert-base-cased
 
 # FIRST train a IL model with validation dataset
-CUDA_VISIBLE_DEVICES=0 python run_glue_IL.py \
+CUDA_VISIBLE_DEVICES=4 python run_glue_IL.py \
   --model_name_or_path $MODEL \
   --task_name $TASK_NAME \
   --do_train \
@@ -26,7 +26,7 @@ MINIBATCH=4
 STRATEGY=IL
 
 # SECOND train a model with train dataset
-CUDA_VISIBLE_DEVICES=3 python run_glue.py \
+CUDA_VISIBLE_DEVICES=4 python run_glue.py \
   --model_name_or_path $MODEL \
   --IL_model_path results/$TASK_NAME/$MODEL/all/IL \
   --task_name $TASK_NAME \
@@ -46,6 +46,6 @@ CUDA_VISIBLE_DEVICES=3 python run_glue.py \
   --strategy $STRATEGY \
   --logging_steps 100 \
   --report_to wandb \
-  --run_name run_glue_mrpc_$MODEL_$STRATEGY \
+  --run_name ${TASK_NAME}_${MODEL}_$STRATEGY \
   --output_dir results/$TASK_NAME/$MODEL/$STRATEGY \
   --overwrite_output_dir
